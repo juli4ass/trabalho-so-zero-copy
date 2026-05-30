@@ -1,0 +1,20 @@
+[   13.101584] sr 0:0:0:2: [sr0] tag#42 Sense Key : Not Ready [current] 
+[   13.101590] sr 0:0:0:2: [sr0] tag#42 Add. Sense: Medium not present - tray open
+[   13.101595] sr 0:0:0:2: [sr0] tag#42 CDB: Read(10) 28 00 00 00 00 03 00 00 01 00
+[   13.101597] I/O error, dev sr0, sector 12 op 0x0:(READ) flags 0x0 phys_seg 1 prio class 2
+[   13.106914] Buffer I/O error on dev sr0, logical block 3, async page read
+[   13.900194] EXT4-fs (sda1): resizing filesystem from 548091 to 7836155 blocks
+[   14.123109] EXT4-fs (sda1): resized filesystem to 7836155
+[   14.192766]  sdb: sdb1
+[   14.523836] EXT4-fs (sdb1): mounted filesystem f7fc261f-16c6-4d82-909b-bdf5e9c60c24 r/w with ordered data mode. Quota mode: none.
+[   25.864536] workqueue: drm_fb_helper_damage_work hogged CPU for >10000us 16 times, consider switching to WQ_UNBOUND
+[   28.611481] loop3: detected capacity change from 0 to 8
+[   49.885252] hv_balloon: Max. dynamic memory size: 8192 MB
+[ 2732.806040] ezdma_fake: loading out-of-tree module taints kernel.
+[ 2732.806052] ezdma_fake: module verification failed: signature and/or required key missing - tainting kernel
+[ 2732.806836] ezdma: inicializando v2.1
+[ 2732.807013] ezdma: /dev/ezdma pronto (read+mmap, NUMA 0)
+[ 2733.041533] x86/PAT: benchmark:3640 map pfn RAM range req uncached-minus for [mem 0x101b4c000-0x101b4cfff], got write-back
+[ 2733.041549] ezdma [MMAP]: pagina mapeada
+[ 2790.546699] x86/PAT: benchmark:3653 map pfn RAM range req uncached-minus for [mem 0x101b4c000-0x101b4cfff], got write-back
+[ 2790.546713] ezdma [MMAP]: pagina mapeada

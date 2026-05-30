@@ -1,0 +1,8 @@
+=== Benchmark Zero-Copy vs Copia Tradicional ===
+Iteracoes: 100000 | Buffer: 4096 bytes
+
+[read()]  total: 205474649 ns | media: 2054 ns/op
+[mmap()]  total: 8915014 ns | media: 89 ns/op
+
+=== Resultado ===
+mmap() foi 95.66% mais rapido | Speedup: 23.05x

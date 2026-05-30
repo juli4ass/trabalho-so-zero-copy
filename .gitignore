@@ -1,0 +1,13 @@
+nano .gitignorenano .gitignore*.ko
+*.o
+*.mod
+*.mod.c
+*.cmd
+*.symvers
+*.order
+.tmp_versions/
+modules.order
+Module.symvers
+benchmark
+.*.cmd
+.tmp_*
