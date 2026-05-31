@@ -7,6 +7,12 @@ Autora: **Julia da Assuncao Silva** e grupo
 Otimizacao de I/O em Sistemas de Tempo Real:
 Implementacao de Zero-Copy e DMA.
 
+## Linha do tempo do projeto
+
+- **Semana 1 (30/05/2026):** Implementacao inicial do driver com `read()` (caminho tradicional) e `mmap()` (caminho otimizado), resolucao de problemas de Secure Boot/Kernel Lockdown no Azure (criacao de VM nova com Standard Security), primeiro benchmark com **~18x de speedup** do mmap sobre read.
+- **Semana 2 (31/05/2026):** Implementacao do `benchmark_rt.c` com tecnicas reais de tempo real (`SCHED_FIFO` + `mlockall` + CPU pinning), analise estatistica completa (P50/P95/P99/P99.9/WCET/jitter sobre 100.000 amostras) e geracao de 3 graficos profissionais (histograma, CDF, comparativo). **WCET reduzido 97% e jitter reduzido 94,7%.**
+- **Semana 3 (31/05/2026):** Refatoracao do driver para DMA Real usando a DMA Coherent API do kernel Linux (`dma_alloc_coherent` + `dma_mmap_coherent` + `platform_device` + `dma_set_coherent_mask(64)`). **Bus address de 64 bits emitido pelo kernel** (evidencia em `dmesg`). WCET do `read()` caiu mais 97% (de 1.084.263 ns para 30.002 ns) e jitter caiu 91%.
+
 ## Conteudo
 - `ezdma_fake.c` - Driver de Kernel Linux (LKM) v3.0 com `dma_alloc_coherent` + `dma_mmap_coherent`
 - `Makefile` - Compilacao out-of-tree
@@ -16,6 +22,7 @@ Implementacao de Zero-Copy e DMA.
 - `results_*.csv` - 100.000 amostras de cada caminho (read/mmap)
 - `graph_*.png` - Histograma, CDF e barras comparativas
 - `resultado_rt.txt` - Saida textual do benchmark_rt v3.0
+
 
 ## Como rodar
 
@@ -79,16 +86,17 @@ ezdma: DMA buffer alocado | virt=00000000d942f7f1 bus=0x0000000102bfd000 size=40
 | P95 | 1.201 ns | 200 ns | 6x |
 | P99 | 1.201 ns | 201 ns | 6x |
 | P99.9 | 8.100 ns | 300 ns | 27x |
-| **Max (WCET)** | **30.002 ns** 🏆 | **32.301 ns** 🏆 | **WCET extremamente baixo** |
-| **Jitter (stddev)** | **336,31 ns** 🏆 | **166,52 ns** 🏆 | **Determinismo elevado** |
+| **Max (WCET)** | **30.002 ns** | **32.301 ns** | **WCET extremamente baixo** |
+| **Jitter (stddev)** | **336,31 ns** | **166,52 ns** | **Determinismo elevado** |
 
-### Comparacao v2.1 -> v3.0 (analise do trade-off)
+
+## Comparacao v2.1 -> v3.0 (analise do trade-off)
 
 | Aspecto | v2.1 | v3.0 | Variacao |
 |---|---:|---:|---:|
-| WCET do `read()` | 1.084.263 ns | **30.002 ns** | **-97%** 🏆 |
-| Jitter do `read()` | 3.978 ns | **336 ns** | **-91%** 🏆 |
-| Jitter do `mmap()` | 210 ns | **166 ns** | **-21%** 🏆 |
+| WCET do `read()` | 1.084.263 ns | **30.002 ns** | **-97%** |
+| Jitter do `read()` | 3.978 ns | **336 ns** | **-91%** |
+| Jitter do `mmap()` | 210 ns | **166 ns** | **-21%** |
 | Media do `read()` | 1.009 ns | 1.193 ns | +18% |
 | Media do `mmap()` | 139 ns | 175 ns | +25% |
 | Speedup medio | 7,24x | 6,82x | -6% |
@@ -101,7 +109,7 @@ ezdma: DMA buffer alocado | virt=00000000d942f7f1 bus=0x0000000102bfd000 size=40
 ![Histograma](graph_histogram.png)
 
 #### CDF (criterio classico de tempo real)
-![CDF](graph_cdf.png)
+graph_cdf.png
 
 #### Comparativo de metricas (escala log)
 ![Comparativo](graph_comparison.png)
@@ -129,7 +137,8 @@ trabalho-so-zero-copy/
 └── README.md            # Este arquivo
 ```
 
-## Linhas de evolucao do driver
 
-- **v2.1 (Semanas 1-2):** `kmalloc_node` + `remap_pfn_range` + `SetPageReserved` — funcional, mas WCET sujeito a picos catastroficos.
-- **v3.0 (Semana 3):** `dma_alloc_coherent` + `dma_mmap_coherent` + `platform_device` + `dma_set_coherent_mask(64)` — **DMA Real**, com bus address de 64 bits emitido pelo kernel. APIs identicas a drivers de producao (NVMe, iwlwifi).
+## Lihas de evolucao do driver
+
+- **v2.1 (Semanas 1-2):** `kmalloc_node` + `remap_pfn_range` + `SetPageReserved` - funcional, mas WCET sujeito a picos catastroficos por interferencia do gerenciador de memoria do kernel.
+- **v3.0 (Semana 3):** `dma_alloc_coherent` + `dma_mmap_coherent` + `platform_device` + `dma_set_coherent_mask(64)` - **DMA Real**, com bus address de 64 bits emitido pelo kernel. APIs identicas a drivers de producao (NVMe, iwlwifi, GPU). Determinismo elevado: WCET de ~30us em 100% das amostras.
