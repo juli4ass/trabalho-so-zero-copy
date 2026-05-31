@@ -57,13 +57,13 @@ sudo rmmod ezdma_fake
 ### Graficos
 
 #### Histograma de latencia
-graph_histogram.png
+![Histograma](graph_histogram.png)
 
 #### CDF (criterio classico de tempo real)
-!CDF
+graph_cdf.png
 
 #### Comparativo de metricas (escala log)
-graph_comparison.png
+![Comparativo](graph_comparison.png)
 
 ## Ambiente
 - Ubuntu 22.04 LTS
