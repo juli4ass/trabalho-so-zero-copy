@@ -60,7 +60,7 @@ sudo rmmod ezdma_fake
 ![Histograma](graph_histogram.png)
 
 #### CDF (criterio classico de tempo real)
-graph_cdf.png
+![CDF](graph_cdf.png)
 
 #### Comparativo de metricas (escala log)
 ![Comparativo](graph_comparison.png)
