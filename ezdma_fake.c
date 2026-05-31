@@ -1,144 +1,269 @@
-# Driver Zero-Copy I/O - ezdma
+/*
+ * ezdma_fake.c - v3.0 (Semana 3 - DMA Real)
+ *
+ * Driver Linux LKM que demonstra Zero-Copy I/O usando a
+ * DMA Coherent API REAL do kernel (dma_alloc_coherent +
+ * dma_mmap_coherent), com platform_device como struct device*.
+ *
+ * Mudancas vs v2.1:
+ *   - kmalloc_node()        -> dma_alloc_coherent()
+ *   - remap_pfn_range()     -> dma_mmap_coherent()
+ *   - SetPageReserved()     -> nao precisa (DMA-coherent api gerencia)
+ *   - Adiciona platform_device como "struct device*" para a DMA API
+ *   - Adiciona dma_addr_t (bus address real)
+ *   - Adiciona dma_set_coherent_mask(64) (compatibilidade ampla)
+ *
+ * Por que isso e DMA REAL:
+ *   - dma_alloc_coherent retorna memoria DMA-coherent, com cache
+ *     coherency garantido entre CPU e qualquer hardware DMA
+ *   - dma_handle (dma_addr_t) e um "bus address" - endereco que
+ *     um controlador DMA fisico usaria para acessar a RAM
+ *   - dma_mmap_coherent mapeia esse bus address ao user space
+ *   - APIs identicas as usadas em drivers de producao (NVMe, iwlwifi)
+ *
+ * Autor: Julia da Assuncao Silva e grupo - FURB / Sistemas de Informacao
+ * Disciplina: Sistemas Operacionais
+ */
 
-Trabalho da disciplina **Sistemas Operacionais** - FURB / Sistemas de Informacao
-Autora: **Julia da Assuncao Silva** e grupo
+#include <linux/init.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/device.h>
+#include <linux/cdev.h>
+#include <linux/mm.h>
+#include <linux/uaccess.h>
+#include <linux/version.h>
+#include <linux/dma-mapping.h>      /* DMA Coherent API */
+#include <linux/platform_device.h>  /* platform_device para ter struct device* */
 
-## Tema
-Otimizacao de I/O em Sistemas de Tempo Real:
-Implementacao de Zero-Copy e DMA.
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Julia e Grupo - FURB");
+MODULE_DESCRIPTION("Driver Zero-Copy v3.0 - DMA REAL via dma_alloc_coherent");
+MODULE_VERSION("3.0");
 
-## Linha do tempo do projeto
+#define DEVICE_NAME "ezdma"
+#define CLASS_NAME  "ezdma_class"
+#define BUFFER_SIZE (4 * 1024)   /* 4 KB = 1 pagina */
 
-- **Semana 1 (30/05/2026):** Implementacao inicial do driver com `read()` (caminho tradicional) e `mmap()` (caminho otimizado), resolucao de problemas de Secure Boot/Kernel Lockdown no Azure (criacao de VM nova com Standard Security), primeiro benchmark com **~18x de speedup** do mmap sobre read.
-- **Semana 2 (31/05/2026):** Implementacao do `benchmark_rt.c` com tecnicas reais de tempo real (`SCHED_FIFO` + `mlockall` + CPU pinning), analise estatistica completa (P50/P95/P99/P99.9/WCET/jitter sobre 100.000 amostras) e geracao de 3 graficos profissionais (histograma, CDF, comparativo). **WCET reduzido 97% e jitter reduzido 94,7%.**
-- **Semana 3 (31/05/2026):** Refatoracao do driver para DMA Real usando a DMA Coherent API do kernel Linux (`dma_alloc_coherent` + `dma_mmap_coherent` + `platform_device` + `dma_set_coherent_mask(64)`). **Bus address de 64 bits emitido pelo kernel** (evidencia em `dmesg`). WCET do `read()` caiu mais 97% (de 1.084.263 ns para 30.002 ns) e jitter caiu 91%.
+static int                      major_number;
+static struct class            *ezdma_class  = NULL;
+static struct device           *ezdma_device = NULL;
+static struct platform_device  *ezdma_pdev   = NULL;  /* novo: device para DMA API */
+static void                    *dma_buffer   = NULL;  /* endereco VIRTUAL no kernel */
+static dma_addr_t               dma_handle;            /* novo: BUS ADDRESS real */
 
-## Conteudo
-- `ezdma_fake.c` - Driver de Kernel Linux (LKM) v3.0 com `dma_alloc_coherent` + `dma_mmap_coherent`
-- `Makefile` - Compilacao out-of-tree
-- `benchmark.c` - Comparativo simples `read()` vs `mmap()`
-- `benchmark_rt.c` - Benchmark **Real-Time** (SCHED_FIFO + mlockall + CPU pin)
-- `plot_results.py` - Gera 3 graficos a partir dos CSVs
-- `results_*.csv` - 100.000 amostras de cada caminho (read/mmap)
-- `graph_*.png` - Histograma, CDF e barras comparativas
-- `resultado_rt.txt` - Saida textual do benchmark_rt v3.0
+/* -----------------------------------------------------------
+ * Permissoes do /dev/ezdma: 0666 (qualquer usuario pode ler/escrever)
+ * Evita "Permission denied" se rodar benchmark sem sudo
+ * ----------------------------------------------------------- */
+static char *ezdma_devnode(const struct device *dev, umode_t *mode)
+{
+    if (mode) *mode = 0666;
+    return NULL;
+}
 
+/* -----------------------------------------------------------
+ * read() tradicional - copy_to_user (caminho baseline)
+ * Mantido para comparacao com mmap (Zero-Copy)
+ * ----------------------------------------------------------- */
+static ssize_t dev_read(struct file *filp, char __user *buf,
+                        size_t len, loff_t *off)
+{
+    size_t to_copy;
 
-## Como rodar
+    if (*off >= BUFFER_SIZE)
+        return 0;
 
-```bash
-sudo apt-get install build-essential linux-headers-$(uname -r) -y
-sudo apt-get install linux-modules-extra-$(uname -r) -y
-make
-sudo insmod ezdma_fake.ko
-sudo ./benchmark_rt
-python3 plot_results.py
-sudo rmmod ezdma_fake
-```
+    to_copy = min(len, (size_t)(BUFFER_SIZE - *off));
 
-## Tecnicas de Tempo Real aplicadas (Semana 2)
+    if (copy_to_user(buf, dma_buffer + *off, to_copy))
+        return -EFAULT;
 
-| Tecnica | Funcao |
-|---|---|
-| `mlockall(MCL_CURRENT \| MCL_FUTURE)` | Trava paginas em RAM (sem page faults) |
-| `SCHED_FIFO` prio 80 | Escalonamento de tempo real |
-| `sched_setaffinity(CPU 1)` | Isola thread em uma unica CPU |
-| Warm-up (1000 iter) | Aquece cache antes da medicao |
-| 100.000 amostras | Base estatistica robusta |
+    *off += to_copy;
+    return to_copy;
+}
 
-## APIs de DMA Real aplicadas (Semana 3)
+/* -----------------------------------------------------------
+ * mmap() Zero-Copy via DMA Coherent API REAL
+ *
+ * Em v2.1 usavamos remap_pfn_range manualmente.
+ * Em v3.0 usamos dma_mmap_coherent que:
+ *   1. Mapeia a regiao DMA-coherent diretamente no user space
+ *   2. Garante cache coherency entre CPU e device
+ *   3. Configura as page tables de forma DMA-aware
+ *   4. Esta na MESMA API usada por drivers NVMe/GPU
+ * ----------------------------------------------------------- */
+static int dev_mmap(struct file *filp, struct vm_area_struct *vma)
+{
+    int ret;
+    size_t size = vma->vm_end - vma->vm_start;
 
-| API do Kernel Linux | Funcao |
-|---|---|
-| `dma_alloc_coherent()` | Aloca memoria DMA-coherent (CPU e device veem o mesmo dado) |
-| `dma_mmap_coherent()` | Mapeia regiao DMA-coherent ao user space (Zero-Copy real) |
-| `platform_device_register_simple()` | Cria struct device* exigido pela DMA API |
-| `dma_set_coherent_mask(DMA_BIT_MASK(64))` | Configura suporte a enderecos de bus de 64 bits |
-| `dma_addr_t dma_handle` | Bus address real (endereco que um hw DMA usaria) |
+    if (size > BUFFER_SIZE) {
+        printk(KERN_ALERT "ezdma: mmap requisitou %zu bytes (max %d)\n",
+               size, BUFFER_SIZE);
+        return -EINVAL;
+    }
 
-Evidencia empirica do bus address real (saida do `dmesg`):
-```
-ezdma: DMA buffer alocado | virt=00000000d942f7f1 bus=0x0000000102bfd000 size=4096
-```
+    /*
+     * dma_mmap_coherent: mapeia o buffer DMA-coherent no user space.
+     * Argumentos:
+     *   &ezdma_pdev->dev  -> struct device* registrado
+     *   vma               -> VMA do processo de usuario
+     *   dma_buffer        -> endereco virtual no kernel (CPU view)
+     *   dma_handle        -> bus address (device view)
+     *   size              -> tamanho a mapear
+     */
+    ret = dma_mmap_coherent(&ezdma_pdev->dev, vma,
+                            dma_buffer, dma_handle, size);
+    if (ret < 0) {
+        printk(KERN_ALERT "ezdma: dma_mmap_coherent falhou (%d)\n", ret);
+        return ret;
+    }
 
-## Evolucao dos Resultados (Ubuntu 22.04 / Azure Standard_D2s_v3)
+    printk(KERN_INFO "ezdma [MMAP]: pagina DMA-coherent mapeada "
+                     "| virt=%p bus=%pad size=%zu\n",
+           dma_buffer, &dma_handle, size);
+    return 0;
+}
 
-### Semana 2 - Benchmark Real-Time (driver v2.1: kmalloc + remap_pfn_range)
+static int dev_open(struct inode *inod, struct file *fil)    { return 0; }
+static int dev_release(struct inode *inod, struct file *fil) { return 0; }
 
-| Metrica | `read()` | `mmap()` Zero-Copy | Ganho |
-|---|---:|---:|---:|
-| Min | 600 ns | 100 ns | 6x |
-| Media | 1.009,81 ns | 139,53 ns | 7,24x |
-| Mediana (P50) | 1.100 ns | 100 ns | 11x |
-| P95 | 1.200 ns | 200 ns | 6x |
-| P99 | 1.201 ns | 200 ns | 6x |
-| P99.9 | 9.101 ns | 300 ns | 30x |
-| **Max (WCET)** | **1.084.263 ns** | **32.501 ns** | **97% menor** |
-| **Jitter (stddev)** | **3.978,53 ns** | **210,74 ns** | **94,7% menor** |
+static const struct file_operations fops = {
+    .owner   = THIS_MODULE,
+    .open    = dev_open,
+    .release = dev_release,
+    .read    = dev_read,
+    .mmap    = dev_mmap,
+};
 
-### Semana 3 - Benchmark Real-Time (driver v3.0: dma_alloc_coherent + dma_mmap_coherent)
+/* -----------------------------------------------------------
+ * Inicializacao do modulo
+ * Sequencia:
+ *   1. Registra platform_device (pra ter struct device*)
+ *   2. Configura DMA mask (64-bit)
+ *   3. Aloca buffer DMA-coherent (dma_alloc_coherent)
+ *   4. Registra character device (/dev/ezdma)
+ *   5. Cria classe sysfs + devnode (udev cria /dev/ezdma)
+ * ----------------------------------------------------------- */
+static int __init ezdma_init(void)
+{
+    int ret;
 
-| Metrica | `read()` | `mmap()` Zero-Copy | Ganho |
-|---|---:|---:|---:|
-| Min | 1.100 ns | 100 ns | 11x |
-| Media | 1.193,72 ns | 175,14 ns | 6,82x |
-| Mediana (P50) | 1.200 ns | 200 ns | 6x |
-| P95 | 1.201 ns | 200 ns | 6x |
-| P99 | 1.201 ns | 201 ns | 6x |
-| P99.9 | 8.100 ns | 300 ns | 27x |
-| **Max (WCET)** | **30.002 ns** | **32.301 ns** | **WCET extremamente baixo** |
-| **Jitter (stddev)** | **336,31 ns** | **166,52 ns** | **Determinismo elevado** |
+    printk(KERN_INFO "ezdma: inicializando v3.0 (DMA Real)\n");
 
+    /* 1. Registra um platform_device dummy.
+     * Isso nos da uma struct device* que e necessaria
+     * para todas as funcoes da DMA Coherent API. */
+    ezdma_pdev = platform_device_register_simple("ezdma", -1, NULL, 0);
+    if (IS_ERR(ezdma_pdev)) {
+        printk(KERN_ALERT "ezdma: platform_device_register_simple falhou\n");
+        return PTR_ERR(ezdma_pdev);
+    }
 
-## Comparacao v2.1 -> v3.0 (analise do trade-off)
+    /* 2. Configura DMA mask para 64 bits.
+     * Indica ao subsistema DMA que nosso "dispositivo"
+     * suporta acessar qualquer endereco da RAM (ate 2^64). */
+    ret = dma_set_coherent_mask(&ezdma_pdev->dev, DMA_BIT_MASK(64));
+    if (ret) {
+        printk(KERN_ALERT "ezdma: dma_set_coherent_mask falhou (%d)\n", ret);
+        goto err_pdev;
+    }
 
-| Aspecto | v2.1 | v3.0 | Variacao |
-|---|---:|---:|---:|
-| WCET do `read()` | 1.084.263 ns | **30.002 ns** | **-97%** |
-| Jitter do `read()` | 3.978 ns | **336 ns** | **-91%** |
-| Jitter do `mmap()` | 210 ns | **166 ns** | **-21%** |
-| Media do `read()` | 1.009 ns | 1.193 ns | +18% |
-| Media do `mmap()` | 139 ns | 175 ns | +25% |
-| Speedup medio | 7,24x | 6,82x | -6% |
+    /* 3. ALOCACAO DMA-COHERENT.
+     * Retorna:
+     *   - dma_buffer: endereco virtual no kernel space (CPU view)
+     *   - dma_handle: bus address (endereco que um hw DMA usaria)
+     * A memoria e cache-coherent: CPU e device veem o MESMO dado
+     * sem precisar de invalidacao manual de cache. */
+    dma_buffer = dma_alloc_coherent(&ezdma_pdev->dev, BUFFER_SIZE,
+                                    &dma_handle, GFP_KERNEL);
+    if (!dma_buffer) {
+        printk(KERN_ALERT "ezdma: dma_alloc_coherent falhou\n");
+        ret = -ENOMEM;
+        goto err_pdev;
+    }
 
-> **Insight chave (trade-off da v3.0):** a v3.0 sacrifica ~20% no caso medio em troca de **reducao de 97% no WCET e 91% no jitter** do `read()` tradicional. Em sistemas de tempo real, esse trade-off e altamente desejavel: **previsibilidade vence velocidade media**. A coerencia de cache imposta pelo `dma_alloc_coherent` elimina os picos catastroficos (~1 ms) que ocorriam no `kmalloc` por interferencia do gerenciador de memoria, garantindo WCET de ~30 us em 100% das amostras.
+    printk(KERN_INFO "ezdma: DMA buffer alocado | "
+                     "virt=%p bus=%pad size=%d\n",
+           dma_buffer, &dma_handle, BUFFER_SIZE);
 
-### Graficos (atualizados com dados da v3.0)
+    /* Escreve dado de demonstracao no buffer */
+    snprintf(dma_buffer, BUFFER_SIZE,
+             "DADO EM MEMORIA DMA-COHERENT - FURB Zero-Copy v3.0\n");
 
-#### Histograma de latencia
-![Histograma](graph_histogram.png)
+    /* 4. Registra major number dinamico */
+    major_number = register_chrdev(0, DEVICE_NAME, &fops);
+    if (major_number < 0) {
+        printk(KERN_ALERT "ezdma: register_chrdev falhou (%d)\n", major_number);
+        ret = major_number;
+        goto err_dma;
+    }
 
-#### CDF (criterio classico de tempo real)
-graph_cdf.png
+    /* 5. Cria classe sysfs.
+     * Compatibilidade kernel 5.x e 6.x:
+     *   - Antes do 6.4: class_create(THIS_MODULE, name)
+     *   - A partir do 6.4: class_create(name) */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
+    ezdma_class = class_create(THIS_MODULE, CLASS_NAME);
+#else
+    ezdma_class = class_create(CLASS_NAME);
+#endif
+    if (IS_ERR(ezdma_class)) {
+        ret = PTR_ERR(ezdma_class);
+        printk(KERN_ALERT "ezdma: class_create falhou (%d)\n", ret);
+        goto err_chrdev;
+    }
+    ezdma_class->devnode = ezdma_devnode;
 
-#### Comparativo de metricas (escala log)
-![Comparativo](graph_comparison.png)
+    /* 6. Cria /dev/ezdma via udev */
+    ezdma_device = device_create(ezdma_class, NULL,
+                                 MKDEV(major_number, 0), NULL, DEVICE_NAME);
+    if (IS_ERR(ezdma_device)) {
+        ret = PTR_ERR(ezdma_device);
+        printk(KERN_ALERT "ezdma: device_create falhou (%d)\n", ret);
+        goto err_class;
+    }
 
-## Ambiente
-- Ubuntu 22.04 LTS
-- Kernel: 6.8.0-1052-azure
-- linux-modules-extra-6.8.0-1052-azure (pacote DMA)
-- VM: Azure Standard_D2s_v3 (Standard Security)
-- Compilador: gcc 11.4.0
-- Python: 3.10 + matplotlib + pandas + numpy
+    printk(KERN_INFO "ezdma: /dev/%s pronto "
+                     "(read + mmap, DMA-coherent real)\n",
+           DEVICE_NAME);
+    return 0;
 
-## Estrutura do projeto
+/* Tratamento de erros - libera tudo na ordem inversa */
+err_class:
+    class_destroy(ezdma_class);
+err_chrdev:
+    unregister_chrdev(major_number, DEVICE_NAME);
+err_dma:
+    dma_free_coherent(&ezdma_pdev->dev, BUFFER_SIZE, dma_buffer, dma_handle);
+err_pdev:
+    platform_device_unregister(ezdma_pdev);
+    return ret;
+}
 
-```
-trabalho-so-zero-copy/
-├── ezdma_fake.c         # Driver LKM v3.0 (DMA Coherent API)
-├── Makefile             # Build out-of-tree
-├── benchmark.c          # Bench simples (read vs mmap)
-├── benchmark_rt.c       # Bench Real-Time (SCHED_FIFO + mlockall + CPU pin)
-├── plot_results.py      # Gera 3 graficos a partir dos CSVs
-├── results_*.csv        # Amostras brutas (100k cada)
-├── graph_*.png          # Graficos gerados
-├── resultado_*.txt      # Saidas textuais dos benchmarks
-└── README.md            # Este arquivo
-```
+/* -----------------------------------------------------------
+ * Encerramento - libera recursos na ordem INVERSA da alocacao
+ * ----------------------------------------------------------- */
+static void __exit ezdma_exit(void)
+{
+    device_destroy(ezdma_class, MKDEV(major_number, 0));
+    class_destroy(ezdma_class);
+    unregister_chrdev(major_number, DEVICE_NAME);
 
+    /* Libera o buffer DMA-coherent */
+    if (dma_buffer) {
+        dma_free_coherent(&ezdma_pdev->dev, BUFFER_SIZE,
+                          dma_buffer, dma_handle);
+    }
 
-## Lihas de evolucao do driver
+    /* Desregistra platform_device */
+    if (ezdma_pdev)
+        platform_device_unregister(ezdma_pdev);
 
-- **v2.1 (Semanas 1-2):** `kmalloc_node` + `remap_pfn_range` + `SetPageReserved` - funcional, mas WCET sujeito a picos catastroficos por interferencia do gerenciador de memoria do kernel.
-- **v3.0 (Semana 3):** `dma_alloc_coherent` + `dma_mmap_coherent` + `platform_device` + `dma_set_coherent_mask(64)` - **DMA Real**, com bus address de 64 bits emitido pelo kernel. APIs identicas a drivers de producao (NVMe, iwlwifi, GPU). Determinismo elevado: WCET de ~30us em 100% das amostras.
+    printk(KERN_INFO "ezdma: descarregado (v3.0 DMA Real)\n");
+}
+
+module_init(ezdma_init);
+module_exit(ezdma_exit);

@@ -1,0 +1,31 @@
+=== Benchmark Real-Time: read() vs mmap() ===
+Amostras: 100000 (warmup: 1000) | CPU pin: 1 | Prio FIFO: 80
+Modo tempo real ATIVO (mlockall + SCHED_FIFO + CPU pin)
+
+=== Resultados [read() tradicional] ===
+  Amostras   : 100000
+  Min        : 1100 ns
+  Media      : 1193.72 ns
+  Mediana P50: 1200 ns
+  P95        : 1201 ns
+  P99        : 1201 ns
+  P99.9      : 8100 ns
+  Max (WCET) : 30002 ns
+  Jitter (sd): 336.31 ns
+  CSV salvo  : results_read.csv
+
+=== Resultados [mmap() Zero-Copy] ===
+  Amostras   : 100000
+  Min        : 100 ns
+  Media      : 175.14 ns
+  Mediana P50: 200 ns
+  P95        : 200 ns
+  P99        : 201 ns
+  P99.9      : 300 ns
+  Max (WCET) : 32301 ns
+  Jitter (sd): 166.52 ns
+  CSV salvo  : results_mmap.csv
+
+=== Comparativo (criterio tempo real) ===
+Speedup medio    : 6.82x
+Reducao do WCET  : -7.66% (max 30002 -> 32301 ns)
