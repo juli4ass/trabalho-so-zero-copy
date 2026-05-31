@@ -1,37 +1,27 @@
 # Driver Zero-Copy I/O - ezdma
 
-Trabalho da disciplina Sistemas Operacionais - FURB / Sistemas de Informacao
-Autora: Julia da Assuncao Silva e grupo
+Trabalho da disciplina **Sistemas Operacionais** - FURB / Sistemas de Informacao
+Autora: **Julia da Assuncao Silva** e grupo
 
 ## Tema
 Otimizacao de I/O em Sistemas de Tempo Real:
 Implementacao de Zero-Copy e DMA.
 
 ## Conteudo
-- ezdma_fake.c - Driver de Kernel Linux (LKM) com read() + mmap()
-- Makefile - Compilacao out-of-tree
-- benchmark.c - Comparativo read() vs mmap()
+- `ezdma_fake.c` - Driver de Kernel Linux (LKM) com `read()` + `mmap()`
+- `Makefile` - Compilacao out-of-tree
+- `benchmark.c` - Comparativo simples `read()` vs `mmap()`
+- `benchmark_rt.c` - Benchmark **Real-Time** (SCHED_FIFO + mlockall + CPU pin)
+- `plot_results.py` - Gera 3 graficos a partir dos CSVs
+- `results_*.csv` - 100.000 amostras de cada caminho (read/mmap)
+- `graph_*.png` - Histograma, CDF e barras comparativas
 
 ## Como rodar
+
+```bash
 sudo apt-get install build-essential linux-headers-$(uname -r) -y
 make
 sudo insmod ezdma_fake.ko
-./benchmark
+sudo ./benchmark_rt
+python3 plot_results.py
 sudo rmmod ezdma_fake
-
-## Resultados (Ubuntu 22.04 / Azure Standard_D2s_v3)
-
-| Execucao | read (ns/op) | mmap (ns/op) | Speedup |
-|---:|---:|---:|---:|
-| 1 | 2042 | 204 | 9.99x |
-| 2 | 2052 | 88 | 23.12x |
-| 3 | 2055 | 117 | 17.54x |
-| 4 | 4123 | 168 | 24.53x |
-| Media | ~2500 | ~145 | ~18x |
-
-mmap() (Zero-Copy) ~18x mais rapido que read() (tradicional).
-
-## Ambiente
-- Ubuntu 22.04 LTS
-- Kernel: 6.8.0-1052-azure
-- VM: Azure Standard_D2s_v3 (Standard Security)
