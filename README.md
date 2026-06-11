@@ -2,7 +2,7 @@ cat > README.md << 'READMEEOF'
 # Driver Zero-Copy I/O - ezdma
 
 Trabalho da disciplina **Sistemas Operacionais** - FURB / Sistemas de Informacao
-Autora: **Julia da Assuncao Silva** e grupo
+Autora: **Julia da Assuncao Silva, Isabella Von Paraski da Luz e Francine dos Santos Ferreira** 
 
 ## Tema
 Otimizacao de I/O em Sistemas de Tempo Real:
