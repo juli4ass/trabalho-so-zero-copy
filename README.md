@@ -10,8 +10,8 @@ Implementacao de Zero-Copy e DMA.
 
 ## Linha do tempo do projeto
 
-- **Semana 1 (30/05/2026):** Implementacao inicial do driver com `read()` (caminho tradicional) e `mmap()` (caminho otimizado), resolucao de problemas de Secure Boot/Kernel Lockdown no Azure (criacao de VM nova com Standard Security), primeiro benchmark com **~18x de speedup** do mmap sobre read.
-- **Semana 2 (31/05/2026):** Implementacao do `benchmark_rt.c` com tecnicas reais de tempo real (`SCHED_FIFO` + `mlockall` + CPU pinning), analise estatistica completa (P50/P95/P99/P99.9/WCET/jitter sobre 100.000 amostras) e geracao de 3 graficos profissionais. **WCET reduzido 97% e jitter reduzido 94,7%.**
+- **Semana 1 (10/05/2026):** Implementacao inicial do driver com `read()` (caminho tradicional) e `mmap()` (caminho otimizado), resolucao de problemas de Secure Boot/Kernel Lockdown no Azure (criacao de VM nova com Standard Security), primeiro benchmark com **~18x de speedup** do mmap sobre read.
+- **Semana 2 (17/05/2026):** Implementacao do `benchmark_rt.c` com tecnicas reais de tempo real (`SCHED_FIFO` + `mlockall` + CPU pinning), analise estatistica completa (P50/P95/P99/P99.9/WCET/jitter sobre 100.000 amostras) e geracao de 3 graficos profissionais. **WCET reduzido 97% e jitter reduzido 94,7%.**
 - **Semana 3 (31/05/2026):** Refatoracao do driver para DMA Real usando a DMA Coherent API do kernel Linux (`dma_alloc_coherent` + `dma_mmap_coherent` + `platform_device` + `dma_set_coherent_mask(64)`). **Bus address de 64 bits emitido pelo kernel** (evidencia em `dmesg`). WCET do `read()` caiu mais 97% (de 1.084.263 ns para 30.002 ns) e jitter caiu 91%.
 
 ## Conteudo
@@ -23,18 +23,6 @@ Implementacao de Zero-Copy e DMA.
 - `results_*.csv` - 100.000 amostras de cada caminho (read/mmap)
 - `graph_*.png` - Histograma, CDF e barras comparativas
 - `resultado_rt.txt` - Saida textual do benchmark_rt v3.0
-
-## Como rodar
-
-\`\`\`bash
-sudo apt-get install build-essential linux-headers-\$(uname -r) -y
-sudo apt-get install linux-modules-extra-\$(uname -r) -y
-make
-sudo insmod ezdma_fake.ko
-sudo ./benchmark_rt
-python3 plot_results.py
-sudo rmmod ezdma_fake
-\`\`\`
 
 ## Tecnicas de Tempo Real aplicadas (Semana 2)
 
